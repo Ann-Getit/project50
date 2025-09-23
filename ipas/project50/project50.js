@@ -10,7 +10,6 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 
 
-//DB_PASSWORD=myAtwnna1!7 uit .env
 app.use(bodyParser.json());
 
 //CORS aanzetten voor alle frontends
