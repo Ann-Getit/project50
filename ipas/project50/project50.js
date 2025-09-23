@@ -1,11 +1,17 @@
 const express = require('express');
 const app = express();
 require('dotenv').config();
-
+const bodyParser = require('body-parser');
+const jwt = require('jsonwebtoken');
 const mysql = require('mysql2');
 const PORT = process.env.PORT || 3002;
 const cors = require('cors');
+const JWT_SECRET = process.env.JWT_SECRET;
 
+
+
+//DB_PASSWORD=myAtwnna1!7 uit .env
+app.use(bodyParser.json());
 
 //CORS aanzetten voor alle frontends
 app.use(cors({
@@ -19,11 +25,24 @@ app.use(cors({
 
 app.use(express.json());//Middleware
 
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return res.status(401).json({ success: false, message: 'Geen token meegegeven' });
+
+  const token = authHeader.split(' ')[1]; // "Bearer TOKEN"
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ success: false, message: 'Token ongeldig' });
+    req.user = user; // zet de user in req voor later gebruik
+    next();
+  });
+}
+
+
 app.use((req, res, next) => {
   console.log('Incoming request:', req.method, req.url);
   next();
 });
-
 
 const db = mysql.createConnection({
   host: process.env.DB_HOST,
@@ -47,7 +66,10 @@ app.use((req, res, next) => {
   next();
 });
 
-
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
 
 const bcrypt = require('bcrypt');
 //schrijft (nieuwe user maken)
@@ -127,23 +149,56 @@ app.post('/api/login', (req, res) => {
       return res.status(401).json({ success: false, message: 'Ongeldig email of wachtwoord' });
     }
 
-    // ✅ Succes
-    res.json({
+
+       // ✅ Maak JWT token
+    const token = jwt.sign(
+      { id: user.id, name: user.name, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    // ✅ Stuur token mee terug 
+    console.log('Generated JWT token:', token);
+res.json({
       success: true,
       message: 'Login succesvol',
+      token,
       user: { id: user.id, name: user.name, email: user.email }
     });
   });
+});
+
+app.post('/api/logout', (req, res) => {
+const authHeader = req.headers['authorization'];
+  if (!authHeader) return res.status(400).json({ success: false, message: 'Geen token meegegeven' });
+  
+
+  const token = authHeader.split(' ')[1]; // "Bearer TOKEN"
+if (!token) return res.status(400).json({ success: false, message: 'Ongeldige token' });
+
+  try {
+  // token verifiëren 
+  const user = jwt.verify(token, JWT_SECRET); 
+  console.log(`User heeft uitgelogd: ${user.name} (${user.email})`);
+
+res.json({ 
+    success: true, 
+    message: 'Logout geregistreerd', user });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: 'Ongeldige token' });
+  }
 });
 
 
 
 
 
-
-
-app.get('/api/users/:id', (req, res) => {
+app.get('/api/users/:id', authenticateToken, (req, res) => {
   const userId = req.params.id;
+
+  // Je kan nu req.user gebruiken (uit de token)
+  console.log('Ingelogde user:', req.user);
+
   db.query('SELECT * FROM users WHERE id = ?', [userId], (err, results) => {
     if (err) return res.status(500).send('Database error');
     if (results.length === 0) return res.status(404).json({ message: 'User niet gevonden' });
@@ -159,7 +214,6 @@ app.get('/api/users/', (req, res) => { //eadonly (alle users ophalen)
     res.json(results);
   });
 });
-
 
 
 // UPDATE (user aanpassen)
